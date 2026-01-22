@@ -22,7 +22,17 @@ logger = logging.getLogger(__name__)
 # リポジトリごとのプロンプトテンプレート
 REPO_TEMPLATES = {
     "raspi-voice8": {
-        "description": "Raspberry Pi上で動作するOpenAI Realtime API使用の音声AIアシスタント",
+        "description": "自分専用のパーソナルアシスタント - 生活を全面サポートするパートナー",
+        "purpose": """【目的】自分の生活を全面サポートするパートナー
+
+【ゴール】
+- 自分の生活パターンを学習し、先回りでサポート
+- メール・予定・タスクを完璧に管理
+- 音声だけで全ての操作が完結
+- プライバシーを守りながら24時間サポート
+- 家族との連絡をスムーズに
+
+【成功指標】応答速度1秒以内、認識精度95%以上、稼働率99%以上""",
         "structure": """raspi-voice8/
 ├── main.py                    # エントリーポイント
 ├── config.py                  # 設定
@@ -44,7 +54,17 @@ REPO_TEMPLATES = {
 └── docs/                      # Voice Messenger Webアプリ""",
     },
     "DNA-commit": {
-        "description": "AIが自動でコードを改善する自己進化システム",
+        "description": "自己進化エンジン - 最も良い技術を自動で取り込み、人々の生活をより良くする装置",
+        "purpose": """【目的】最も良い技術を自動で取り込み、人々の生活をより良くするためにプロジェクトを進化させる装置
+
+【ゴール】
+- 最新のAI/技術トレンドを自動で発見・評価
+- 人間の介入なしに安全にコードを改善
+- バグや脆弱性を自動で検出・修正
+- パフォーマンスを継続的に最適化
+- 新機能のアイデアを自動で提案・実装
+
+【成功指標】採用された改善の数、コード品質スコアの向上、自動承認率""",
         "structure": """DNA-commit/
 ├── main.py              # メインオーケストレーター
 ├── scheduler.py         # 自動実行スケジューラー
@@ -66,6 +86,8 @@ CODE_GENERATION_PROMPT = """あなたは{repo_name}プロジェクトの改善�
 ## ターゲットプロジェクト: {repo_name}
 {repo_description}
 
+{repo_purpose}
+
 ### 現在のプロジェクト構造
 ```
 {repo_structure}
@@ -80,7 +102,8 @@ URL: {url}
 期待される改善: {potential_improvements}
 
 ## タスク
-上記の情報を元に、{repo_name}の改善コードを生成してください。
+上記の情報を元に、{repo_name}の**目的とゴールに沿った**改善コードを生成してください。
+ユーザーの生活をより良くすることを第一に考えてください。
 
 ## 出力形式（JSON）
 {{
@@ -95,6 +118,7 @@ URL: {url}
         }}
     ],
     "commit_message": "この変更のコミットメッセージ",
+    "user_benefit": "この改善がユーザーにもたらす具体的な恩恵",
     "risk_level": "low|medium|high",
     "test_suggestions": ["テスト方法の提案"],
     "rollback_plan": "問題発生時のロールバック手順"
@@ -144,6 +168,7 @@ class CodeGenerator:
             prompt = CODE_GENERATION_PROMPT.format(
                 repo_name=target_repo,
                 repo_description=repo_template["description"],
+                repo_purpose=repo_template.get("purpose", ""),
                 repo_structure=repo_template["structure"],
                 title=item.get("title", ""),
                 url=item.get("url", ""),

@@ -31,22 +31,38 @@ URL: {url}
 
 ## 対象プロジェクト
 
-### 1. raspi-voice8（音声AIアシスタント）
-- Raspberry Pi上で動作する音声AIアシスタント
-- OpenAI Realtime APIを使用
-- 機能: Gmail連携、カレンダー、Web検索、ビジョン(カメラ)、音声メッセージ、ビデオ通話
-- 技術: Python, PyAudio, WebRTC, Firebase, GPIO
+### 1. raspi-voice8（自分専用パーソナルアシスタント）
+**目的**: 自分の生活を全面サポートするパートナー
 
-### 2. DNA-commit（自己進化システム）
-- AIが自動でコードを改善するシステム
-- 情報収集 → 評価 → コード生成 → レビュー → コミットのサイクル
-- 技術: Python, Claude API, Tavily API, GitHub API, Git
+**ゴール**:
+- 自分の生活パターンを学習し、先回りでサポート
+- メール・予定・タスクを完璧に管理
+- 音声だけで全ての操作が完結
+- プライバシーを守りながら24時間サポート
+
+**技術**: Python, OpenAI Realtime API, PyAudio, WebRTC, Firebase, GPIO
+
+**成功指標**: 応答速度1秒以内、認識精度95%以上、稼働率99%以上
+
+### 2. DNA-commit（自己進化エンジン）
+**目的**: 最も良い技術を自動で取り込み、人々の生活をより良くするためにプロジェクトを進化させる装置
+
+**ゴール**:
+- 最新のAI/技術トレンドを自動で発見・評価
+- 人間の介入なしに安全にコードを改善
+- バグや脆弱性を自動で検出・修正
+- 新機能のアイデアを自動で提案・実装
+
+**技術**: Python, Claude API, Tavily API, GitHub API, Git
+
+**成功指標**: 採用された改善の数、コード品質スコアの向上
 
 ## 評価基準
 1. **品質スコア (0.0-1.0)**: 情報の信頼性、正確性、詳細さ
-2. **関連性スコア (0.0-1.0)**: プロジェクトへの適用可能性
+2. **関連性スコア (0.0-1.0)**: プロジェクトの目的・ゴールへの貢献度
 3. **新規性スコア (0.0-1.0)**: 既存の一般的な知識を超えた新しい情報か
 4. **実用性スコア (0.0-1.0)**: 実際にコードに適用できるか
+5. **インパクトスコア (0.0-1.0)**: 人々の生活をより良くする可能性
 
 ## 出力形式（JSON）
 {{
@@ -54,11 +70,13 @@ URL: {url}
     "relevance_score": 0.0-1.0,
     "novelty_score": 0.0-1.0,
     "practicality_score": 0.0-1.0,
+    "impact_score": 0.0-1.0,
     "overall_score": 0.0-1.0,
     "summary": "この情報の要約（2-3文）",
-    "target_repos": ["raspi-voice8", "DNA-commit"],  // 適用可能なリポジトリ（両方可）
+    "target_repos": ["raspi-voice8", "DNA-commit"],
     "applicable_areas": ["適用可能な領域のリスト"],
     "potential_improvements": ["この情報で可能な改善のリスト"],
+    "user_benefit": "この改善がユーザーにもたらす具体的な恩恵",
     "risks": ["適用時のリスクや注意点"],
     "recommendation": "adopt|consider|reject",
     "reasoning": "判断理由"
