@@ -22,8 +22,8 @@ class Config:
     GENERATED_CODE_DIR = os.path.join(DATA_DIR, "generated_code")
     LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
-    # ターゲットリポジトリ（raspi-voice7）
-    TARGET_REPO_PATH = os.path.expanduser("~/dev/raspi-voice7")
+    # ターゲットリポジトリ（raspi-voice8）
+    TARGET_REPO_PATH = os.path.expanduser("~/dev/raspi-voice8")
 
     # 検索キーワード
     SEARCH_TOPICS = [
