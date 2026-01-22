@@ -25,29 +25,50 @@ class Config:
     # ターゲットリポジトリ（raspi-voice8）
     TARGET_REPO_PATH = os.path.expanduser("~/dev/raspi-voice8")
 
-    # 検索キーワード
+    # 検索キーワード（具体的・実用的）
     SEARCH_TOPICS = [
-        # raspi-voice改善関連
-        "raspberry pi voice assistant",
-        "openai realtime api best practices",
-        "python audio streaming optimization",
-        "webrtc python raspberry pi",
-        "gpiozero button handling",
+        # === バグ修正・安定性 ===
+        "PyAudio buffer overflow fix",
+        "Python asyncio memory leak solution",
+        "OpenAI Realtime API error handling",
+        "WebSocket reconnection best practices Python",
+        "Raspberry Pi audio crackling fix",
 
-        # AI/機械学習関連
-        "latest AI models 2025",
-        "machine learning best practices",
-        "edge AI raspberry pi",
-        "voice recognition optimization",
-        "natural language processing advances",
+        # === 新機能アイデア ===
+        "OpenAI Realtime API new features 2025",
+        "voice assistant wake word detection Python",
+        "offline speech recognition Raspberry Pi",
+        "GPT-4o vision API use cases",
+        "smart home voice control integration",
+
+        # === パフォーマンス最適化 ===
+        "Python audio latency reduction techniques",
+        "Raspberry Pi 4 low latency audio",
+        "asyncio performance optimization",
+        "WebRTC audio quality improvement",
+        "PyAudio vs sounddevice performance",
+
+        # === セキュリティ ===
+        "voice assistant security best practices",
+        "API key management Python",
+        "Firebase security rules voice app",
     ]
 
-    # GitHub検索キーワード
+    # GitHub検索キーワード（具体的なリポジトリ発見用）
     GITHUB_TOPICS = [
-        "raspberry-pi voice-assistant",
-        "openai-realtime-api",
-        "python audio streaming",
-        "aiortc webrtc",
+        # 類似プロジェクト
+        "openai-realtime-api voice",
+        "raspberry-pi assistant GPT",
+        "python voice assistant async",
+
+        # 特定技術
+        "pyaudio streaming example",
+        "aiortc raspberry pi",
+        "whisper realtime transcription",
+
+        # 改善手法
+        "audio buffer management python",
+        "gpio button debounce python",
     ]
 
     # 情報評価の閾値
