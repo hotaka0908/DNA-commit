@@ -22,11 +22,27 @@ class Config:
     GENERATED_CODE_DIR = os.path.join(DATA_DIR, "generated_code")
     LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
-    # ターゲットリポジトリ（raspi-voice8）
+    # ターゲットリポジトリ（複数対応）
+    TARGET_REPOS = {
+        "raspi-voice8": {
+            "path": os.path.expanduser("~/dev/raspi-voice8"),
+            "description": "Raspberry Pi音声AIアシスタント",
+            "github": "https://github.com/hotaka0908/raspi-voice8",
+        },
+        "DNA-commit": {
+            "path": os.path.expanduser("~/dev/DNA-commit"),
+            "description": "自己進化システム（このシステム自身）",
+            "github": "https://github.com/hotaka0908/DNA-commit",
+        },
+    }
+
+    # デフォルトターゲット（後方互換性）
     TARGET_REPO_PATH = os.path.expanduser("~/dev/raspi-voice8")
 
-    # 検索キーワード（具体的・実用的）
-    SEARCH_TOPICS = [
+    # ========================================
+    # raspi-voice8 用検索キーワード
+    # ========================================
+    SEARCH_TOPICS_RASPI_VOICE = [
         # === バグ修正・安定性 ===
         "PyAudio buffer overflow fix",
         "Python asyncio memory leak solution",
@@ -54,22 +70,59 @@ class Config:
         "Firebase security rules voice app",
     ]
 
-    # GitHub検索キーワード（具体的なリポジトリ発見用）
-    GITHUB_TOPICS = [
-        # 類似プロジェクト
+    # ========================================
+    # DNA-commit 自己改善用検索キーワード
+    # ========================================
+    SEARCH_TOPICS_DNA_COMMIT = [
+        # === AI エージェント改善 ===
+        "LLM agent best practices 2025",
+        "Claude API function calling optimization",
+        "AI code generation quality improvement",
+        "automated code review techniques",
+        "self-improving AI systems",
+
+        # === 情報収集改善 ===
+        "web scraping best practices Python",
+        "Tavily API advanced usage",
+        "GitHub API search optimization",
+        "information quality assessment AI",
+        "knowledge base management",
+
+        # === Git 自動化 ===
+        "git automation Python best practices",
+        "automated pull request creation",
+        "code commit quality checks",
+        "branch management automation",
+
+        # === システム信頼性 ===
+        "Python scheduler reliability",
+        "long running process monitoring",
+        "error recovery patterns Python",
+        "logging best practices Python",
+    ]
+
+    # 統合検索キーワード（両方を含む）
+    SEARCH_TOPICS = SEARCH_TOPICS_RASPI_VOICE + SEARCH_TOPICS_DNA_COMMIT
+
+    # GitHub検索キーワード
+    GITHUB_TOPICS_RASPI_VOICE = [
         "openai-realtime-api voice",
         "raspberry-pi assistant GPT",
         "python voice assistant async",
-
-        # 特定技術
         "pyaudio streaming example",
         "aiortc raspberry pi",
         "whisper realtime transcription",
-
-        # 改善手法
-        "audio buffer management python",
-        "gpio button debounce python",
     ]
+
+    GITHUB_TOPICS_DNA_COMMIT = [
+        "AI code generation agent",
+        "self-improving system",
+        "automated git commit",
+        "LLM code review",
+        "knowledge base evolution",
+    ]
+
+    GITHUB_TOPICS = GITHUB_TOPICS_RASPI_VOICE + GITHUB_TOPICS_DNA_COMMIT
 
     # 情報評価の閾値
     QUALITY_THRESHOLD = 0.7  # 0.7以上の情報のみ採用

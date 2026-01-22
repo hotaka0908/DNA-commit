@@ -41,53 +41,68 @@ logger = logging.getLogger("DNA-commit")
 
 
 class DNACommitOrchestrator:
-    """自己進化システムのオーケストレーター"""
+    """自己進化システムのオーケストレーター（複数リポジトリ対応）"""
 
     def __init__(self):
         self.collector = InformationCollector()
         self.evaluator = InformationEvaluator()
         self.generator = CodeGenerator()
-        self.committer = GitCommitter()
         self.reviewer = CodeReviewer()
         self.cleaner = KnowledgeCleaner()
 
+        # 複数リポジトリ用のコミッター
+        self.committers = {}
+        for repo_name, repo_config in Config.TARGET_REPOS.items():
+            self.committers[repo_name] = GitCommitter(repo_config["path"])
+
+        # デフォルトコミッター（後方互換性）
+        self.committer = self.committers.get("raspi-voice8", GitCommitter())
+
     def run_full_cycle(self) -> dict:
-        """フルサイクルを実行"""
+        """フルサイクルを実行（全リポジトリ対象）"""
         logger.info("=" * 60)
         logger.info("DNA-commit: 自己進化サイクル開始")
+        logger.info(f"対象リポジトリ: {', '.join(Config.TARGET_REPOS.keys())}")
         logger.info("=" * 60)
 
         results = {
             "timestamp": datetime.now().isoformat(),
+            "target_repos": list(Config.TARGET_REPOS.keys()),
             "collection": None,
             "evaluation": None,
-            "generation": None,
-            "review": None,
-            "commit": None,
+            "generation": {},  # リポジトリごとの結果
+            "review": {},
+            "commit": {},
             "cleanup": None,
             "errors": [],
         }
 
         try:
-            # 1. 情報収集
+            # 1. 情報収集（全リポジトリ共通）
             logger.info("\n[1/6] 情報収集")
             results["collection"] = self.run_collection()
 
-            # 2. 情報評価
+            # 2. 情報評価（全リポジトリ共通）
             logger.info("\n[2/6] 情報評価")
             results["evaluation"] = self.run_evaluation()
 
-            # 3. コード生成
-            logger.info("\n[3/6] コード生成")
-            results["generation"] = self.run_generation()
+            # 3-5. 各リポジトリに対してコード生成・レビュー・コミット
+            for repo_name, repo_config in Config.TARGET_REPOS.items():
+                logger.info(f"\n{'='*40}")
+                logger.info(f"処理中: {repo_name}")
+                logger.info(f"{'='*40}")
 
-            # 4. レビュー
-            logger.info("\n[4/6] コードレビュー")
-            results["review"] = self.run_review()
+                # 3. コード生成
+                logger.info(f"\n[3/6] コード生成 ({repo_name})")
+                results["generation"][repo_name] = self.run_generation(repo_name)
 
-            # 5. コミット
-            logger.info("\n[5/6] コミット")
-            results["commit"] = self.run_commit()
+                # 4. レビュー
+                logger.info(f"\n[4/6] コードレビュー ({repo_name})")
+                results["review"][repo_name] = self.run_review()
+
+                # 5. コミット
+                logger.info(f"\n[5/6] コミット ({repo_name})")
+                results["commit"][repo_name] = self.run_commit(repo_name)
 
             # 6. クリーンアップ
             logger.info("\n[6/6] クリーンアップ")
@@ -145,8 +160,8 @@ class DNACommitOrchestrator:
             logger.error(f"評価エラー: {e}")
             return {"error": str(e)}
 
-    def run_generation(self) -> dict:
-        """コード生成を実行"""
+    def run_generation(self, target_repo: str = "raspi-voice8") -> dict:
+        """コード生成を実行（ターゲットリポジトリ指定）"""
         try:
             # 採用可能なアイテムを取得
             from agents.collector import InformationCollector
@@ -156,27 +171,40 @@ class DNACommitOrchestrator:
             for item in collector.collected_data.get("items", []):
                 evaluation = item.get("evaluation", {})
                 if evaluation.get("recommendation") == "adopt":
-                    if item.get("status") != "code_generated":
+                    # まだコード生成されていない、かつこのリポジトリ用に生成されていない
+                    generated_for = item.get("generated_for", [])
+                    if target_repo not in generated_for:
                         item["evaluation"] = evaluation
+                        item["target_repo"] = target_repo
                         adoptable_items.append(item)
 
-            logger.info(f"コード生成対象: {len(adoptable_items)}件")
+            logger.info(f"コード生成対象 ({target_repo}): {len(adoptable_items)}件")
 
             generations = []
-            for item in adoptable_items[:5]:  # 一度に最大5件
+            for item in adoptable_items[:3]:  # 一度に最大3件（各リポジトリ）
+                # ターゲットリポジトリ情報を追加
+                item["target_repo_config"] = Config.TARGET_REPOS.get(target_repo, {})
                 generation = self.generator.generate(item)
+                generation["target_repo"] = target_repo
                 generations.append(generation)
 
                 # ステータス更新
-                collector.update_item_status(item["id"], "code_generated")
+                generated_for = item.get("generated_for", [])
+                generated_for.append(target_repo)
+                collector.update_item_status(
+                    item["id"],
+                    "code_generated",
+                    {"generated_for": generated_for}
+                )
 
             return {
+                "target_repo": target_repo,
                 "generated_count": len(generations),
                 "generations": generations,
             }
         except Exception as e:
-            logger.error(f"生成エラー: {e}")
-            return {"error": str(e)}
+            logger.error(f"生成エラー ({target_repo}): {e}")
+            return {"error": str(e), "target_repo": target_repo}
 
     def run_review(self) -> dict:
         """コードレビューを実行"""
@@ -209,24 +237,31 @@ class DNACommitOrchestrator:
             logger.error(f"レビューエラー: {e}")
             return {"error": str(e)}
 
-    def run_commit(self) -> dict:
-        """コミットを実行"""
+    def run_commit(self, target_repo: str = "raspi-voice8") -> dict:
+        """コミットを実行（ターゲットリポジトリ指定）"""
         try:
-            # 承認済みの生成を取得
+            # このリポジトリ用のコミッターを取得
+            committer = self.committers.get(target_repo)
+            if not committer:
+                return {"error": f"Unknown repository: {target_repo}"}
+
+            # 承認済みの生成を取得（このリポジトリ用のもののみ）
             generations = self.generator.generation_history.get("generations", [])
             approved = [
                 g for g in generations
-                if g.get("status") == "approved" and g.get("review", {}).get("approved")
+                if g.get("status") == "approved"
+                and g.get("review", {}).get("approved")
+                and g.get("target_repo") == target_repo
             ]
 
-            logger.info(f"コミット対象: {len(approved)}件")
+            logger.info(f"コミット対象 ({target_repo}): {len(approved)}件")
 
             commits = []
-            for generation in approved[:3]:  # 一度に最大3件
+            for generation in approved[:2]:  # 一度に最大2件（各リポジトリ）
                 # 自動承認可能かチェック
                 review = generation.get("review", {})
                 if self.reviewer.should_auto_approve(review):
-                    commit_result = self.committer.commit(generation, reviewed=True)
+                    commit_result = committer.commit(generation, reviewed=True)
                     commits.append(commit_result)
 
                     if commit_result.get("success"):
@@ -235,13 +270,14 @@ class DNACommitOrchestrator:
                     logger.info(f"手動承認が必要: {generation.get('source_title', '')[:50]}")
 
             return {
+                "target_repo": target_repo,
                 "committed_count": len([c for c in commits if c.get("success")]),
                 "commits": commits,
-                "statistics": self.committer.get_statistics(),
+                "statistics": committer.get_statistics(),
             }
         except Exception as e:
-            logger.error(f"コミットエラー: {e}")
-            return {"error": str(e)}
+            logger.error(f"コミットエラー ({target_repo}): {e}")
+            return {"error": str(e), "target_repo": target_repo}
 
     def run_cleanup(self) -> dict:
         """クリーンアップを実行"""
@@ -253,20 +289,28 @@ class DNACommitOrchestrator:
             return {"error": str(e)}
 
     def get_status(self) -> dict:
-        """現在の状態を取得"""
+        """現在の状態を取得（全リポジトリ）"""
+        # 各リポジトリのコミット統計
+        commit_stats = {}
+        pending_branches = {}
+        for repo_name, committer in self.committers.items():
+            commit_stats[repo_name] = committer.get_statistics()
+            pending_branches[repo_name] = committer.get_pending_branches()
+
         return {
+            "target_repos": list(Config.TARGET_REPOS.keys()),
             "data_summary": self.cleaner.get_data_summary(),
             "evaluation_stats": self.evaluator.get_statistics(),
             "review_stats": self.reviewer.get_statistics(),
-            "commit_stats": self.committer.get_statistics(),
+            "commit_stats": commit_stats,
             "cleanup_stats": self.cleaner.get_statistics(),
-            "pending_branches": self.committer.get_pending_branches(),
+            "pending_branches": pending_branches,
             "feedback_analysis": self.evaluator.analyze_feedback(),
             "common_issues": self.reviewer.analyze_common_issues(),
         }
 
     def _print_summary(self, results: dict):
-        """サマリーを表示"""
+        """サマリーを表示（複数リポジトリ対応）"""
         logger.info("\n" + "=" * 60)
         logger.info("DNA-commit: サイクル完了サマリー")
         logger.info("=" * 60)
@@ -279,23 +323,27 @@ class DNACommitOrchestrator:
             e = results["evaluation"]
             logger.info(f"評価: {e.get('evaluated_count', 0)}件評価, {e.get('adoptable_count', 0)}件採用可能")
 
-        if results.get("generation"):
-            g = results["generation"]
-            logger.info(f"生成: {g.get('generated_count', 0)}件のコード生成")
+        # 各リポジトリの結果
+        for repo_name in results.get("target_repos", []):
+            logger.info(f"\n--- {repo_name} ---")
 
-        if results.get("review"):
-            r = results["review"]
-            logger.info(f"レビュー: {r.get('reviewed_count', 0)}件レビュー, {r.get('auto_approved_count', 0)}件自動承認")
+            gen = results.get("generation", {}).get(repo_name, {})
+            if gen and not gen.get("error"):
+                logger.info(f"  生成: {gen.get('generated_count', 0)}件")
 
-        if results.get("commit"):
-            cm = results["commit"]
-            logger.info(f"コミット: {cm.get('committed_count', 0)}件コミット")
+            rev = results.get("review", {}).get(repo_name, {})
+            if rev and not rev.get("error"):
+                logger.info(f"  レビュー: {rev.get('reviewed_count', 0)}件, 自動承認: {rev.get('auto_approved_count', 0)}件")
+
+            cm = results.get("commit", {}).get(repo_name, {})
+            if cm and not cm.get("error"):
+                logger.info(f"  コミット: {cm.get('committed_count', 0)}件")
 
         if results.get("cleanup"):
             cl = results["cleanup"]
             stale = cl.get("stale", {}).get("removed_count", 0) if cl.get("stale") else 0
             low_q = cl.get("low_quality", {}).get("removed_count", 0) if cl.get("low_quality") else 0
-            logger.info(f"クリーンアップ: {stale + low_q}件削除")
+            logger.info(f"\nクリーンアップ: {stale + low_q}件削除")
 
         if results.get("errors"):
             logger.warning(f"エラー: {len(results['errors'])}件")

@@ -22,22 +22,29 @@ logger = logging.getLogger(__name__)
 
 EVALUATION_PROMPT = """あなたは技術情報の品質評価エージェントです。
 
-以下の情報を評価し、raspi-voice（Raspberry Pi音声アシスタント）プロジェクトの改善に役立つかどうかを判定してください。
+以下の情報を評価し、どのプロジェクトの改善に役立つか判定してください。
 
 ## 評価対象情報
 タイトル: {title}
 URL: {url}
 内容: {content}
 
-## raspi-voiceの概要
+## 対象プロジェクト
+
+### 1. raspi-voice8（音声AIアシスタント）
 - Raspberry Pi上で動作する音声AIアシスタント
 - OpenAI Realtime APIを使用
-- 機能: Gmail連携、カレンダー、Web検索、ビジョン(カメラ)、音声メッセージ
+- 機能: Gmail連携、カレンダー、Web検索、ビジョン(カメラ)、音声メッセージ、ビデオ通話
 - 技術: Python, PyAudio, WebRTC, Firebase, GPIO
+
+### 2. DNA-commit（自己進化システム）
+- AIが自動でコードを改善するシステム
+- 情報収集 → 評価 → コード生成 → レビュー → コミットのサイクル
+- 技術: Python, Claude API, Tavily API, GitHub API, Git
 
 ## 評価基準
 1. **品質スコア (0.0-1.0)**: 情報の信頼性、正確性、詳細さ
-2. **関連性スコア (0.0-1.0)**: raspi-voiceへの適用可能性
+2. **関連性スコア (0.0-1.0)**: プロジェクトへの適用可能性
 3. **新規性スコア (0.0-1.0)**: 既存の一般的な知識を超えた新しい情報か
 4. **実用性スコア (0.0-1.0)**: 実際にコードに適用できるか
 
@@ -49,6 +56,7 @@ URL: {url}
     "practicality_score": 0.0-1.0,
     "overall_score": 0.0-1.0,
     "summary": "この情報の要約（2-3文）",
+    "target_repos": ["raspi-voice8", "DNA-commit"],  // 適用可能なリポジトリ（両方可）
     "applicable_areas": ["適用可能な領域のリスト"],
     "potential_improvements": ["この情報で可能な改善のリスト"],
     "risks": ["適用時のリスクや注意点"],

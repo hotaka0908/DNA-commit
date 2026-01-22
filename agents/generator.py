@@ -19,29 +19,56 @@ from config import Config
 logger = logging.getLogger(__name__)
 
 
-CODE_GENERATION_PROMPT = """あなたはraspi-voiceプロジェクトの改善コードを生成するエキスパートエンジニアです。
-
-## ターゲットプロジェクト: raspi-voice7
-Raspberry Pi上で動作するOpenAI Realtime API使用の音声AIアシスタント
-
-### 現在のプロジェクト構造
-```
-raspi-voice7/
+# リポジトリごとのプロンプトテンプレート
+REPO_TEMPLATES = {
+    "raspi-voice8": {
+        "description": "Raspberry Pi上で動作するOpenAI Realtime API使用の音声AIアシスタント",
+        "structure": """raspi-voice8/
 ├── main.py                    # エントリーポイント
 ├── config.py                  # 設定
 ├── core/                      # コア機能
 │   ├── audio.py               # 音声入出力
 │   ├── openai_realtime_client.py  # OpenAI Realtime APIクライアント
-│   └── firebase_voice.py      # Firebase音声メッセージ
+│   ├── firebase_voice.py      # Firebase音声メッセージ
+│   ├── firebase_signaling.py  # ビデオ通話シグナリング
+│   └── webrtc.py              # WebRTC
 ├── capabilities/              # 能力モジュール
 │   ├── communication.py       # Gmail連携
 │   ├── calendar.py            # カレンダー連携
 │   ├── schedule.py            # アラーム/リマインダー
 │   ├── search.py              # Web検索（Tavily）
 │   ├── memory.py              # 記憶/ライフログ
-│   └── vision.py              # ビジョン機能（GPT-4o）
+│   ├── vision.py              # ビジョン機能（GPT-4o）
+│   └── videocall.py           # ビデオ通話
 ├── prompts/                   # システムプロンプト
-└── docs/                      # Voice Messenger Webアプリ
+└── docs/                      # Voice Messenger Webアプリ""",
+    },
+    "DNA-commit": {
+        "description": "AIが自動でコードを改善する自己進化システム",
+        "structure": """DNA-commit/
+├── main.py              # メインオーケストレーター
+├── scheduler.py         # 自動実行スケジューラー
+├── config.py            # 設定
+├── agents/              # エージェントモジュール
+│   ├── collector.py     # 情報収集（Tavily/GitHub API）
+│   ├── evaluator.py     # 情報評価（Claude API）
+│   ├── generator.py     # コード生成（Claude API）
+│   ├── committer.py     # Gitコミット
+│   ├── reviewer.py      # コードレビュー
+│   └── cleaner.py       # クリーンアップ
+├── data/                # データ保存
+└── logs/                # ログ""",
+    },
+}
+
+CODE_GENERATION_PROMPT = """あなたは{repo_name}プロジェクトの改善コードを生成するエキスパートエンジニアです。
+
+## ターゲットプロジェクト: {repo_name}
+{repo_description}
+
+### 現在のプロジェクト構造
+```
+{repo_structure}
 ```
 
 ## 参考情報
@@ -53,13 +80,13 @@ URL: {url}
 期待される改善: {potential_improvements}
 
 ## タスク
-上記の情報を元に、raspi-voice7の改善コードを生成してください。
+上記の情報を元に、{repo_name}の改善コードを生成してください。
 
 ## 出力形式（JSON）
 {{
     "changes": [
         {{
-            "file_path": "改善対象のファイルパス（例: capabilities/search.py）",
+            "file_path": "改善対象のファイルパス（例: agents/collector.py）",
             "change_type": "new_file|modify|add_function|refactor",
             "description": "この変更の説明",
             "code": "生成されたコード（完全なファイル内容または追加コード）",
@@ -106,11 +133,18 @@ class CodeGenerator:
         return None
 
     def generate(self, item: dict) -> dict:
-        """情報を元にコードを生成"""
+        """情報を元にコードを生成（ターゲットリポジトリ対応）"""
         try:
             evaluation = item.get("evaluation", {})
+            target_repo = item.get("target_repo", "raspi-voice8")
+
+            # リポジトリ情報を取得
+            repo_template = REPO_TEMPLATES.get(target_repo, REPO_TEMPLATES["raspi-voice8"])
 
             prompt = CODE_GENERATION_PROMPT.format(
+                repo_name=target_repo,
+                repo_description=repo_template["description"],
+                repo_structure=repo_template["structure"],
                 title=item.get("title", ""),
                 url=item.get("url", ""),
                 content=item.get("content", item.get("description", ""))[:4000],
@@ -136,6 +170,7 @@ class CodeGenerator:
             generation["generated_at"] = datetime.now().isoformat()
             generation["source_item_id"] = item.get("id")
             generation["source_title"] = item.get("title")
+            generation["target_repo"] = target_repo
             generation["status"] = "pending_review"
 
             # 履歴に追加
@@ -143,7 +178,7 @@ class CodeGenerator:
             self._update_statistics(generation)
             self._save_generation_history()
 
-            logger.info(f"コード生成完了: {item.get('title', '')[:50]}")
+            logger.info(f"コード生成完了 ({target_repo}): {item.get('title', '')[:50]}")
             return generation
 
         except json.JSONDecodeError as e:
