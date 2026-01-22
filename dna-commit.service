@@ -1,0 +1,19 @@
+[Unit]
+Description=DNA-commit Self-Evolving System
+After=network.target
+
+[Service]
+Type=simple
+User=funahashihotaka
+WorkingDirectory=/Users/funahashihotaka/dev/DNA-commit
+Environment="PATH=/Users/funahashihotaka/dev/DNA-commit/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/Users/funahashihotaka/dev/DNA-commit/venv/bin/python scheduler.py --mode full
+Restart=always
+RestartSec=60
+
+# ログ設定
+StandardOutput=append:/Users/funahashihotaka/dev/DNA-commit/logs/service.log
+StandardError=append:/Users/funahashihotaka/dev/DNA-commit/logs/service_error.log
+
+[Install]
+WantedBy=multi-user.target
