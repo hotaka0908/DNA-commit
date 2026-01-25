@@ -217,25 +217,27 @@ class CodeReviewer:
             stats[f"issue_{severity}"] = stats.get(f"issue_{severity}", 0) + 1
 
     def should_auto_approve(self, review: dict) -> bool:
-        """自動承認可能かどうかを判定"""
-        if not review.get("approved", False):
-            return False
-
-        if review.get("recommendation") != "approve":
-            return False
-
-        # セキュリティスコアが高いことを確認
-        if review.get("security_score", 0) < 0.8:
-            return False
-
-        # 全体スコアが高いことを確認
-        if review.get("overall_score", 0) < 0.7:
-            return False
-
-        # criticalな問題がないことを確認
+        """自動承認可能かどうかを判定（スコアベース）"""
+        # criticalな問題がないことを確認（最重要）
         for issue in review.get("issues", []):
             if issue.get("severity") == "critical":
                 return False
+
+        # 全体スコアが高いことを確認
+        if review.get("overall_score", 0) < 0.65:
+            return False
+
+        # セキュリティスコアが最低限あることを確認
+        if review.get("security_score", 0) < 0.6:
+            return False
+
+        # 品質スコアが最低限あることを確認
+        if review.get("quality_score", 0) < 0.5:
+            return False
+
+        # rejectは除外（request_changesはOK）
+        if review.get("recommendation") == "reject":
+            return False
 
         return True
 

@@ -75,20 +75,46 @@ class GitCommitter:
         return success
 
     def apply_changes(self, generation: dict) -> list[str]:
-        """生成されたコードを適用"""
+        """生成されたコードを適用（diff/code両形式対応）"""
         applied_files = []
 
+        # 新形式: トップレベルにdiffがある場合
+        if generation.get("diff"):
+            file_path = generation.get("file_path", "")
+            diff_content = generation.get("diff", "")
+            if file_path and diff_content:
+                if self._apply_diff(file_path, diff_content):
+                    applied_files.append(file_path)
+                    logger.info(f"diff適用: {file_path}")
+
+        # changes配列を処理
         for change in generation.get("changes", []):
             file_path = change.get("file_path", "")
             code = change.get("code", "")
+            diff_content = change.get("diff", "")
             change_type = change.get("change_type", "")
 
-            if not file_path or not code:
+            if not file_path:
+                continue
+
+            # 既に適用済みならスキップ
+            if file_path in applied_files:
                 continue
 
             target_path = os.path.join(self.repo_path, file_path)
 
             try:
+                # diff形式の場合
+                if diff_content and not code:
+                    if self._apply_diff(file_path, diff_content):
+                        applied_files.append(file_path)
+                        logger.info(f"diff適用: {file_path}")
+                    continue
+
+                # code形式の場合（旧形式）
+                if not code:
+                    continue
+
                 # ディレクトリ作成
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
@@ -116,6 +142,66 @@ class GitCommitter:
                 logger.error(f"変更適用失敗: {file_path} - {e}")
 
         return applied_files
+
+    def _apply_diff(self, file_path: str, diff_content: str) -> bool:
+        """diffをファイルに適用"""
+        import tempfile
+
+        try:
+            # 一時ファイルにdiffを保存
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as f:
+                f.write(diff_content)
+                patch_file = f.name
+
+            # git applyで適用（--check でドライランしてから本適用）
+            success, output = self._run_git("apply", "--check", patch_file)
+            if success:
+                success, output = self._run_git("apply", patch_file)
+                if success:
+                    logger.info(f"git apply成功: {file_path}")
+                    os.unlink(patch_file)
+                    return True
+
+            # git applyが失敗した場合、手動でパッチ適用を試みる
+            logger.warning(f"git apply失敗、手動適用を試みます: {output}")
+            result = self._manual_apply_diff(file_path, diff_content)
+            os.unlink(patch_file)
+            return result
+
+        except Exception as e:
+            logger.error(f"diff適用エラー: {e}")
+            return False
+
+    def _manual_apply_diff(self, file_path: str, diff_content: str) -> bool:
+        """diffを手動で適用（追加行のみ抽出して追加）"""
+        try:
+            target_path = os.path.join(self.repo_path, file_path)
+
+            # 追加行を抽出
+            added_lines = []
+            for line in diff_content.split('\n'):
+                if line.startswith('+') and not line.startswith('+++'):
+                    added_lines.append(line[1:])  # +を除去
+
+            if not added_lines:
+                return False
+
+            # バックアップ
+            if os.path.exists(target_path):
+                shutil.copy2(target_path, target_path + ".backup")
+
+            # ファイル末尾に追加（簡易版）
+            with open(target_path, "a", encoding="utf-8") as f:
+                f.write("\n\n# === DNA-commit auto-generated ===\n")
+                f.write('\n'.join(added_lines))
+                f.write("\n")
+
+            logger.info(f"手動diff適用: {file_path} ({len(added_lines)}行追加)")
+            return True
+
+        except Exception as e:
+            logger.error(f"手動diff適用失敗: {e}")
+            return False
 
     def commit(self, generation: dict, reviewed: bool = False) -> dict:
         """変更をコミット"""

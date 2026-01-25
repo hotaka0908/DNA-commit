@@ -287,17 +287,23 @@ class DNACommitOrchestrator:
     def run_review(self) -> dict:
         """コードレビューを実行"""
         try:
-            pending_generations = self.generator.get_pending_generations()
-            logger.info(f"レビュー対象: {len(pending_generations)}件")
+            all_generations = self.generator.generation_history.get("generations", [])
+            pending_count = sum(1 for g in all_generations if g.get("status") == "pending_review")
+            logger.info(f"レビュー対象: {pending_count}件")
 
             reviews = []
-            for i, generation in enumerate(pending_generations):
+            for i, generation in enumerate(all_generations):
                 if generation.get("status") == "pending_review":
                     review = self.reviewer.review(generation)
                     reviews.append(review)
 
-                    # ステータス更新
-                    new_status = "approved" if review.get("approved") else "rejected"
+                    # ステータス更新（スコアベースで判定）
+                    if self.reviewer.should_auto_approve(review):
+                        new_status = "approved"
+                    elif review.get("recommendation") == "reject":
+                        new_status = "rejected"
+                    else:
+                        new_status = "pending_manual_review"
                     self.generator.update_generation_status(i, new_status, review)
 
             # 自動承認可能なもの
@@ -328,7 +334,6 @@ class DNACommitOrchestrator:
             approved = [
                 g for g in generations
                 if g.get("status") == "approved"
-                and g.get("review", {}).get("approved")
                 and g.get("target_repo") == target_repo
             ]
 
