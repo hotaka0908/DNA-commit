@@ -104,13 +104,30 @@ class CodeReviewer:
             json.dump(self.review_history, f, ensure_ascii=False, indent=2)
 
     def _format_changes(self, generation: dict) -> str:
-        """変更内容をフォーマット"""
+        """変更内容をフォーマット（新旧両形式対応）"""
         changes_text = ""
+
+        # 新形式: トップレベルにdiffがある場合
+        if generation.get("diff"):
+            changes_text += f"\n### 変更: {generation.get('file_path', 'unknown')}\n"
+            changes_text += f"関数: {generation.get('function_name', 'unknown')}\n"
+            changes_text += f"タイプ: {generation.get('change_type', 'unknown')}\n"
+            changes_text += f"説明: {generation.get('description', '')}\n"
+            changes_text += f"```diff\n{generation.get('diff', '')[:3000]}\n```\n"
+            return changes_text
+
+        # 旧形式: changes配列
         for i, change in enumerate(generation.get("changes", []), 1):
             changes_text += f"\n### 変更 {i}: {change.get('file_path', 'unknown')}\n"
             changes_text += f"タイプ: {change.get('change_type', 'unknown')}\n"
             changes_text += f"説明: {change.get('description', '')}\n"
-            changes_text += f"```python\n{change.get('code', '')[:3000]}\n```\n"
+
+            # diff形式（新）またはcode形式（旧）
+            if change.get('diff'):
+                changes_text += f"```diff\n{change.get('diff', '')[:3000]}\n```\n"
+            else:
+                changes_text += f"```python\n{change.get('code', '')[:3000]}\n```\n"
+
         return changes_text
 
     def review(self, generation: dict) -> dict:
