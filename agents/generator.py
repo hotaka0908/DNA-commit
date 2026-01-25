@@ -126,6 +126,49 @@ URL: {url}
 
 JSONのみを出力してください。コードは完全で実行可能なものにしてください。"""
 
+# 改善版: 1ファイル・1関数に限定したプロンプト
+SINGLE_CHANGE_PROMPT = """あなたは{repo_name}プロジェクトの改善コードを生成するエキスパートエンジニアです。
+
+## ターゲットプロジェクト: {repo_name}
+{repo_description}
+
+{repo_purpose}
+
+## 変更対象ファイル
+パス: {file_path}
+
+### 既存コード
+```python
+{existing_code}
+```
+
+## 参考情報
+タイトル: {title}
+内容: {content}
+期待される改善: {potential_improvements}
+
+## タスク
+上記の既存コードを参考に、**1つの関数のみ**を追加または修正してください。
+- 既存のコードスタイル、インポート、クラス構造を維持
+- 変更は最小限に
+- 既存の関数シグネチャを壊さない
+
+## 出力形式（JSON）
+{{
+    "file_path": "{file_path}",
+    "function_name": "変更または追加する関数名",
+    "change_type": "add_function|modify_function",
+    "diff": "unified diff形式（--- a/... +++ b/... @@ ... @@）",
+    "description": "この変更の説明（1-2文）",
+    "commit_message": "簡潔なコミットメッセージ",
+    "risk_level": "low|medium|high"
+}}
+
+重要:
+- diffは実際のunified diff形式で出力（git diffと同じ形式）
+- 変更部分のみを含める（ファイル全体ではない）
+- JSONのみを出力"""
+
 
 class CodeGenerator:
     """コード生成エージェント"""
@@ -155,6 +198,55 @@ class CodeGenerator:
             with open(full_path, "r", encoding="utf-8") as f:
                 return f.read()
         return None
+
+    def _gather_context(self, item: dict, target_repo: str) -> dict:
+        """変更対象ファイルのコンテキストを収集"""
+        evaluation = item.get("evaluation", {})
+        applicable_areas = evaluation.get("applicable_areas", [])
+
+        context = {
+            "target_files": {},
+            "related_files": {},
+        }
+
+        # 適用可能な領域からファイルを特定
+        for area in applicable_areas:
+            # ファイルパス形式の場合（例: core/audio.py）
+            if "/" in area and area.endswith(".py"):
+                existing_code = self._read_existing_code(area)
+                if existing_code:
+                    context["target_files"][area] = {
+                        "code": existing_code,
+                        "lines": len(existing_code.splitlines()),
+                    }
+                else:
+                    # 新規ファイルとしてマーク
+                    context["target_files"][area] = {
+                        "code": None,
+                        "lines": 0,
+                        "is_new": True,
+                    }
+
+        # target_filesが空の場合、デフォルトのターゲットを推測
+        if not context["target_files"]:
+            repo_template = REPO_TEMPLATES.get(target_repo, {})
+            # 構造から主要ファイルを特定（最初のpyファイル）
+            if target_repo == "raspi-voice8":
+                default_targets = ["core/audio.py", "main.py"]
+            else:
+                default_targets = ["main.py"]
+
+            for target in default_targets:
+                existing_code = self._read_existing_code(target)
+                if existing_code:
+                    context["target_files"][target] = {
+                        "code": existing_code,
+                        "lines": len(existing_code.splitlines()),
+                    }
+                    break
+
+        logger.info(f"コンテキスト収集完了: {len(context['target_files'])}ファイル")
+        return context
 
     def _extract_json(self, text: str) -> str:
         """テキストからJSON部分を抽出"""
@@ -194,94 +286,203 @@ class CodeGenerator:
 
         return json_str
 
-    def generate(self, item: dict) -> dict:
-        """情報を元にコードを生成（ターゲットリポジトリ対応）"""
+    def _generate_single_change(self, item: dict, file_path: str,
+                                existing_code: str, target_repo: str) -> dict:
+        """1つのファイルに対する変更を生成"""
         evaluation = item.get("evaluation", {})
-        target_repo = item.get("target_repo", "raspi-voice8")
         repo_template = REPO_TEMPLATES.get(target_repo, REPO_TEMPLATES["raspi-voice8"])
 
-        # 最大3回リトライ
-        max_retries = 3
-        last_error = None
+        # 既存コードが長すぎる場合は関連部分のみ抽出
+        code_to_include = existing_code
+        if existing_code and len(existing_code) > 3000:
+            # 最初の3000文字 + 末尾の情報
+            code_to_include = existing_code[:2500] + "\n\n# ... (中略) ...\n\n" + existing_code[-500:]
 
-        for attempt in range(max_retries):
+        prompt = SINGLE_CHANGE_PROMPT.format(
+            repo_name=target_repo,
+            repo_description=repo_template["description"],
+            repo_purpose=repo_template.get("purpose", ""),
+            file_path=file_path,
+            existing_code=code_to_include if code_to_include else "# 新規ファイル",
+            title=item.get("title", ""),
+            content=item.get("content", item.get("description", ""))[:2000],
+            potential_improvements=", ".join(evaluation.get("potential_improvements", [])),
+        )
+
+        response = self.client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4000,  # diffのみなので少なめで十分
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        result_text = response.content[0].text
+        json_str = self._extract_json(result_text)
+
+        try:
+            generation = json.loads(json_str)
+        except json.JSONDecodeError:
+            repaired = self._repair_json(json_str)
+            generation = json.loads(repaired)
+
+        return generation
+
+    def _validate_generation(self, generation: dict) -> tuple[bool, list[str]]:
+        """生成結果の構文チェックとバリデーション"""
+        import ast
+        errors = []
+
+        # 必須フィールドの確認
+        required_fields = ["file_path", "function_name", "diff", "commit_message"]
+        for field in required_fields:
+            if field not in generation:
+                errors.append(f"必須フィールド '{field}' がありません")
+
+        # diffが空でないか確認
+        diff = generation.get("diff", "")
+        if not diff or len(diff.strip()) < 10:
+            errors.append("diffが空または短すぎます")
+
+        # diffに切れた兆候がないか確認
+        if diff:
+            # 閉じ括弧の確認
+            open_parens = diff.count('(') - diff.count(')')
+            open_brackets = diff.count('[') - diff.count(']')
+            open_braces = diff.count('{') - diff.count('}')
+
+            if open_parens > 2 or open_brackets > 2 or open_braces > 2:
+                errors.append("diffに未閉じの括弧があります（コードが途中で切れている可能性）")
+
+            # 文字列が閉じていない
+            if diff.count('"""') % 2 == 1:
+                errors.append("三重引用符が閉じていません")
+            if diff.count("'''") % 2 == 1:
+                errors.append("三重シングル引用符が閉じていません")
+
+        # diffから追加コードを抽出して構文チェック
+        added_lines = []
+        for line in diff.split('\n'):
+            if line.startswith('+') and not line.startswith('+++'):
+                added_lines.append(line[1:])  # +を除去
+
+        if added_lines:
+            added_code = '\n'.join(added_lines)
+            # 完全な関数として構文チェック（インデントを調整）
             try:
-                # リトライ時はより簡潔な出力を要求
-                extra_instruction = ""
-                if attempt > 0:
-                    extra_instruction = "\n\n重要: JSONは簡潔に、コードは1つの主要な変更のみに絞ってください。"
+                # 単純な構文チェック
+                compile(added_code, '<generated>', 'exec')
+            except SyntaxError as e:
+                # 部分的なコードの場合はエラーを無視
+                if "unexpected EOF" not in str(e) and "expected" not in str(e).lower():
+                    errors.append(f"構文エラーの可能性: {e}")
 
-                prompt = CODE_GENERATION_PROMPT.format(
-                    repo_name=target_repo,
-                    repo_description=repo_template["description"],
-                    repo_purpose=repo_template.get("purpose", ""),
-                    repo_structure=repo_template["structure"],
-                    title=item.get("title", ""),
-                    url=item.get("url", ""),
-                    content=item.get("content", item.get("description", ""))[:3000],  # 少し短く
-                    summary=evaluation.get("summary", ""),
-                    applicable_areas=", ".join(evaluation.get("applicable_areas", [])),
-                    potential_improvements=", ".join(evaluation.get("potential_improvements", [])),
-                ) + extra_instruction
+        is_valid = len(errors) == 0
+        return is_valid, errors
 
-                response = self.client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=8000,  # 4000 -> 8000 に増加
-                    messages=[{"role": "user", "content": prompt}],
-                )
+    def generate(self, item: dict) -> dict:
+        """情報を元にコードを生成（改善版: 1ファイル・1関数に限定）"""
+        target_repo = item.get("target_repo", "raspi-voice8")
 
-                result_text = response.content[0].text
+        # Step 1: 既存コードのコンテキストを収集
+        context = self._gather_context(item, target_repo)
 
-                # JSON部分を抽出
-                json_str = self._extract_json(result_text)
+        if not context["target_files"]:
+            logger.warning("変更対象ファイルが特定できません")
+            return self._create_fallback_generation(item, "変更対象ファイルが特定できません")
 
-                # JSONパースを試みる
+        # Step 2: 各ファイルに対して個別に変更を生成（1ファイルのみ）
+        # 複数ファイル同時生成を避け、最初のターゲットのみ処理
+        all_changes = []
+        validation_errors = []
+
+        for file_path, file_info in list(context["target_files"].items())[:1]:  # 1ファイルのみ
+            existing_code = file_info.get("code", "")
+
+            max_retries = 3
+            last_error = None
+
+            for attempt in range(max_retries):
                 try:
-                    generation = json.loads(json_str)
-                except json.JSONDecodeError:
-                    # 修復を試みる
-                    repaired = self._repair_json(json_str)
-                    generation = json.loads(repaired)
+                    # Step 2a: 単一ファイルの変更を生成
+                    single_change = self._generate_single_change(
+                        item, file_path, existing_code, target_repo
+                    )
 
-                generation["generated_at"] = datetime.now().isoformat()
-                generation["source_item_id"] = item.get("id")
-                generation["source_title"] = item.get("title")
-                generation["target_repo"] = target_repo
-                generation["status"] = "pending_review"
+                    # Step 2b: バリデーション
+                    is_valid, errors = self._validate_generation(single_change)
 
-                # 履歴に追加
-                self.generation_history["generations"].append(generation)
-                self._update_statistics(generation)
-                self._save_generation_history()
+                    if is_valid:
+                        all_changes.append(single_change)
+                        logger.info(f"生成成功: {file_path}")
+                        break
+                    else:
+                        last_error = "; ".join(errors)
+                        logger.warning(f"バリデーションエラー (attempt {attempt + 1}): {last_error}")
+                        validation_errors.extend(errors)
 
-                logger.info(f"コード生成完了 ({target_repo}): {item.get('title', '')[:50]}")
-                return generation
+                except json.JSONDecodeError as e:
+                    last_error = str(e)
+                    logger.warning(f"JSON parse error (attempt {attempt + 1}/{max_retries}): {e}")
+                except Exception as e:
+                    last_error = str(e)
+                    logger.error(f"Generation error (attempt {attempt + 1}/{max_retries}): {e}")
 
-            except json.JSONDecodeError as e:
-                last_error = str(e)
-                logger.warning(f"JSON parse error (attempt {attempt + 1}/{max_retries}): {e}")
-                continue
-            except Exception as e:
-                last_error = str(e)
-                logger.error(f"Generation error (attempt {attempt + 1}/{max_retries}): {e}")
-                continue
+            else:
+                # 全リトライ失敗
+                logger.error(f"ファイル {file_path} の生成失敗: {last_error}")
 
-        # 全リトライ失敗
-        logger.error(f"全リトライ失敗: {last_error}")
-        return self._create_fallback_generation(item, last_error)
+        # Step 3: 結果をまとめる
+        if not all_changes:
+            return self._create_fallback_generation(
+                item,
+                f"全ファイルの生成失敗: {'; '.join(validation_errors) if validation_errors else 'Unknown error'}"
+            )
+
+        # 新しい形式で結果を構築
+        first_change = all_changes[0]
+        generation = {
+            "file_path": first_change.get("file_path"),
+            "function_name": first_change.get("function_name"),
+            "change_type": first_change.get("change_type", "modify_function"),
+            "diff": first_change.get("diff"),
+            "description": first_change.get("description", ""),
+            "commit_message": first_change.get("commit_message", ""),
+            "risk_level": first_change.get("risk_level", "low"),
+            # メタデータ
+            "generated_at": datetime.now().isoformat(),
+            "source_item_id": item.get("id"),
+            "source_title": item.get("title"),
+            "target_repo": target_repo,
+            "status": "pending_review",
+            # 後方互換性のためchanges配列も保持
+            "changes": all_changes,
+        }
+
+        # 履歴に追加
+        self.generation_history["generations"].append(generation)
+        self._update_statistics(generation)
+        self._save_generation_history()
+
+        logger.info(f"コード生成完了 ({target_repo}): {item.get('title', '')[:50]}")
+        return generation
 
     def _create_fallback_generation(self, item: dict, error: str) -> dict:
         """エラー時のフォールバック"""
+        target_repo = item.get("target_repo", "raspi-voice8")
         return {
-            "changes": [],
+            "file_path": None,
+            "function_name": None,
+            "change_type": None,
+            "diff": None,
+            "description": f"生成失敗: {error}",
             "commit_message": f"[FAILED] コード生成失敗: {item.get('title', '')[:50]}",
             "risk_level": "high",
-            "test_suggestions": ["手動でのコード確認が必要"],
-            "rollback_plan": "変更なし",
             "error": error,
             "generated_at": datetime.now().isoformat(),
             "source_item_id": item.get("id"),
+            "source_title": item.get("title"),
+            "target_repo": target_repo,
             "status": "failed",
+            "changes": [],
         }
 
     def _update_statistics(self, generation: dict):
@@ -298,31 +499,64 @@ class CodeGenerator:
         stats[f"risk_{risk}"] = stats.get(f"risk_{risk}", 0) + 1
 
     def save_generated_code(self, generation: dict) -> list[str]:
-        """生成されたコードをファイルに保存"""
+        """生成されたコード/diffをファイルに保存"""
         saved_files = []
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        for change in generation.get("changes", []):
-            file_path = change.get("file_path", "")
-            code = change.get("code", "")
-            change_type = change.get("change_type", "")
+        # 新形式: diff を直接保存
+        if generation.get("diff"):
+            file_path = generation.get("file_path", "unknown.py")
+            diff = generation.get("diff", "")
 
-            if not file_path or not code:
-                continue
-
-            # 生成コード保存先
+            # diff ファイルとして保存
             save_path = os.path.join(
                 Config.GENERATED_CODE_DIR,
-                datetime.now().strftime("%Y%m%d_%H%M%S"),
-                file_path
+                timestamp,
+                file_path.replace(".py", ".diff")
             )
 
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
             with open(save_path, "w", encoding="utf-8") as f:
-                f.write(code)
+                f.write(diff)
 
             saved_files.append(save_path)
-            logger.info(f"生成コード保存: {save_path}")
+            logger.info(f"生成diff保存: {save_path}")
+
+        # 旧形式との互換性: changes配列にcodeがある場合
+        for change in generation.get("changes", []):
+            file_path = change.get("file_path", "")
+            code = change.get("code", "")
+            diff = change.get("diff", "")
+
+            if not file_path:
+                continue
+
+            # codeがある場合（旧形式）
+            if code:
+                save_path = os.path.join(
+                    Config.GENERATED_CODE_DIR,
+                    timestamp,
+                    file_path
+                )
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                with open(save_path, "w", encoding="utf-8") as f:
+                    f.write(code)
+                saved_files.append(save_path)
+                logger.info(f"生成コード保存: {save_path}")
+
+            # diffがある場合（新形式）
+            elif diff and file_path.replace(".py", ".diff") not in [os.path.basename(f) for f in saved_files]:
+                save_path = os.path.join(
+                    Config.GENERATED_CODE_DIR,
+                    timestamp,
+                    file_path.replace(".py", ".diff")
+                )
+                os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                with open(save_path, "w", encoding="utf-8") as f:
+                    f.write(diff)
+                saved_files.append(save_path)
+                logger.info(f"生成diff保存: {save_path}")
 
         return saved_files
 
