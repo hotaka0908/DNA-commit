@@ -256,6 +256,15 @@ class GitCommitter:
                 result["commit_hash"] = commit_hash[:8] if success else None
                 result["success"] = True
                 logger.info(f"コミット成功: {result['commit_hash']} on {branch_name}")
+
+                # 自動マージ & プッシュ
+                if reviewed:
+                    merge_success = self._merge_and_push(branch_name)
+                    result["merged"] = merge_success
+                    if merge_success:
+                        logger.info(f"mainにマージ＆プッシュ完了")
+                    else:
+                        logger.warning(f"マージまたはプッシュに失敗しました")
             else:
                 result["error"] = output
                 logger.error(f"コミット失敗: {output}")
@@ -280,6 +289,46 @@ class GitCommitter:
             stats["successful_commits"] = stats.get("successful_commits", 0) + 1
         else:
             stats["failed_commits"] = stats.get("failed_commits", 0) + 1
+
+    def _merge_and_push(self, branch_name: str) -> bool:
+        """ブランチをmainにマージしてプッシュ"""
+        try:
+            # mainブランチに切り替え
+            success, output = self._run_git("checkout", "main")
+            if not success:
+                success, output = self._run_git("checkout", "master")
+            if not success:
+                logger.error(f"mainブランチへの切り替え失敗: {output}")
+                return False
+
+            # マージ
+            success, output = self._run_git("merge", branch_name, "--no-edit")
+            if not success:
+                logger.error(f"マージ失敗: {output}")
+                # コンフリクト時はマージを中止
+                self._run_git("merge", "--abort")
+                return False
+
+            logger.info(f"マージ成功: {branch_name} → main")
+
+            # プッシュ
+            success, output = self._run_git("push", "origin", "main")
+            if not success:
+                logger.error(f"プッシュ失敗: {output}")
+                return False
+
+            logger.info("プッシュ成功: origin/main")
+
+            # ブランチ削除
+            success, output = self._run_git("branch", "-d", branch_name)
+            if success:
+                logger.info(f"ブランチ削除: {branch_name}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"マージ/プッシュエラー: {e}")
+            return False
 
     def revert_last_commit(self) -> bool:
         """最後のコミットをリバート"""
