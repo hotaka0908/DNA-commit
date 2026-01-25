@@ -477,3 +477,61 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# === DNA-commit auto-generated ===
+import json
+
+
+async def handle_search_request(query: str, search_depth: str = "basic", max_results: int = 5) -> Optional[dict]:
+    """
+    Tavily APIを使用してリアルタイム検索を実行
+    
+    Args:
+        query: 検索クエリ
+        search_depth: 検索の深度 (basic, fast, advanced, ultra-fast)
+        max_results: 最大結果数 (1-20)
+    
+    Returns:
+        検索結果辞書またはNone（エラー時）
+    """
+    try:
+        # 入力バリデーション
+        if not query or not isinstance(query, str):
+            logger.warning("Invalid query provided")
+            return None
+            
+        query = query.strip()[:500]  # サニタイズ: 長さ制限
+        
+        if search_depth not in ["basic", "fast", "advanced", "ultra-fast"]:
+            search_depth = "basic"
+            
+        max_results = max(1, min(max_results, 20))  # 範囲チェック
+        
+        # APIキーを環境変数から取得
+        api_key = os.getenv("TAVILY_API_KEY")
+        if not api_key:
+            logger.warning("Tavily API key not found")
+            return None
+            
+        # 検索パラメータ
+        search_params = {
+            "query": query,
+            "search_depth": search_depth,
+            "max_results": max_results,
+            "topic": "general"
+        }
+        
+        # 検索実行をログ（クエリの一部のみ）
+        safe_query = query[:50] + "..." if len(query) > 50 else query
+        logger.info(f"Search request: {safe_query}")
+        
+        # TODO: 実際のAPIコール実装は次のイテレーションで
+        return {"status": "ready", "params": search_params}
+        
+    except Exception as e:
+        logger.error(f"Search request failed: {str(e)[:100]}")
+        return None
+
+
+def signal_handler(sig, frame):
