@@ -14,13 +14,31 @@
     <key>WorkingDirectory</key>
     <string>/Users/funahashihotaka/dev/DNA-commit</string>
 
+    <!-- 複数の時間帯に実行（スリープ対策） -->
     <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>3</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
+    <array>
+        <!-- 早朝 3:00 -->
+        <dict>
+            <key>Hour</key>
+            <integer>3</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <!-- 朝 9:00（Macが起動している可能性が高い） -->
+        <dict>
+            <key>Hour</key>
+            <integer>9</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <!-- 夜 21:00（作業後） -->
+        <dict>
+            <key>Hour</key>
+            <integer>21</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
 
     <key>StandardOutPath</key>
     <string>/Users/funahashihotaka/dev/DNA-commit/logs/launchd.log</string>
@@ -34,7 +52,8 @@
         <string>/Users/funahashihotaka/dev/DNA-commit/venv/bin:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 
+    <!-- ロード時に一度実行（Macの起動/再起動後に確実に実行） -->
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
 </dict>
 </plist>

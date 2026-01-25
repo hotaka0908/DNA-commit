@@ -19,7 +19,8 @@ DNA-commit: 自己進化システム
 import argparse
 import logging
 import json
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 
 from agents import (
     InformationCollector,
@@ -43,6 +44,9 @@ logger = logging.getLogger("DNA-commit")
 class DNACommitOrchestrator:
     """自己進化システムのオーケストレーター（複数リポジトリ対応）"""
 
+    # 最小実行間隔（時間）
+    MIN_INTERVAL_HOURS = 4
+
     def __init__(self):
         self.collector = InformationCollector()
         self.evaluator = InformationEvaluator()
@@ -58,10 +62,81 @@ class DNACommitOrchestrator:
         # デフォルトコミッター（後方互換性）
         self.committer = self.committers.get("raspi-voice8", GitCommitter())
 
-    def run_full_cycle(self) -> dict:
+        # 実行記録ファイル
+        self.run_log_path = os.path.join(Config.LOGS_DIR, "run_history.json")
+
+    def _load_run_history(self) -> dict:
+        """実行履歴を読み込む"""
+        if os.path.exists(self.run_log_path):
+            try:
+                with open(self.run_log_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {"runs": []}
+
+    def _save_run_history(self, history: dict):
+        """実行履歴を保存"""
+        with open(self.run_log_path, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+
+    def _should_run_full_cycle(self) -> tuple[bool, str]:
+        """フルサイクルを実行すべきか判定"""
+        history = self._load_run_history()
+        runs = history.get("runs", [])
+
+        if not runs:
+            return True, "初回実行"
+
+        # 最後の成功した実行を取得
+        last_run = runs[-1]
+        last_time_str = last_run.get("timestamp")
+
+        if not last_time_str:
+            return True, "前回実行時刻不明"
+
+        try:
+            last_time = datetime.fromisoformat(last_time_str)
+            elapsed = datetime.now() - last_time
+            min_interval = timedelta(hours=self.MIN_INTERVAL_HOURS)
+
+            if elapsed < min_interval:
+                remaining = min_interval - elapsed
+                return False, f"前回実行から{elapsed.seconds // 3600}時間{(elapsed.seconds % 3600) // 60}分（{self.MIN_INTERVAL_HOURS}時間間隔まで残り{remaining.seconds // 60}分）"
+
+            return True, f"前回実行から{elapsed.seconds // 3600}時間{(elapsed.seconds % 3600) // 60}分経過"
+        except Exception as e:
+            return True, f"時刻パースエラー: {e}"
+
+    def _record_run(self, results: dict):
+        """実行を記録"""
+        history = self._load_run_history()
+        history["runs"].append({
+            "timestamp": datetime.now().isoformat(),
+            "success": not results.get("errors"),
+            "summary": {
+                "collected": results.get("collection", {}).get("new_items_count", 0),
+                "evaluated": results.get("evaluation", {}).get("evaluated_count", 0),
+            }
+        })
+        # 最新100件のみ保持
+        history["runs"] = history["runs"][-100:]
+        self._save_run_history(history)
+
+    def run_full_cycle(self, force: bool = False) -> dict:
         """フルサイクルを実行（全リポジトリ対象）"""
+        # 重複実行チェック
+        should_run, reason = self._should_run_full_cycle()
+        if not should_run and not force:
+            logger.info("=" * 60)
+            logger.info("DNA-commit: スキップ")
+            logger.info(f"理由: {reason}")
+            logger.info("=" * 60)
+            return {"skipped": True, "reason": reason}
+
         logger.info("=" * 60)
         logger.info("DNA-commit: 自己進化サイクル開始")
+        logger.info(f"実行理由: {reason}")
         logger.info(f"対象リポジトリ: {', '.join(Config.TARGET_REPOS.keys())}")
         logger.info("=" * 60)
 
@@ -111,6 +186,9 @@ class DNACommitOrchestrator:
         except Exception as e:
             logger.error(f"サイクル中にエラー発生: {e}")
             results["errors"].append(str(e))
+
+        # 実行記録
+        self._record_run(results)
 
         # サマリー表示
         self._print_summary(results)
@@ -360,6 +438,7 @@ def main():
     parser.add_argument("--commit", action="store_true", help="コミットのみ")
     parser.add_argument("--cleanup", action="store_true", help="クリーンアップのみ")
     parser.add_argument("--status", action="store_true", help="現在の状態を表示")
+    parser.add_argument("--force", action="store_true", help="重複チェックをスキップして強制実行")
 
     args = parser.parse_args()
 
@@ -388,7 +467,7 @@ def main():
         print(json.dumps(status, ensure_ascii=False, indent=2))
     else:
         # フルサイクル実行
-        result = orchestrator.run_full_cycle()
+        result = orchestrator.run_full_cycle(force=args.force)
 
 
 if __name__ == "__main__":

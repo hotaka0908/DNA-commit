@@ -156,62 +156,119 @@ class CodeGenerator:
                 return f.read()
         return None
 
+    def _extract_json(self, text: str) -> str:
+        """テキストからJSON部分を抽出"""
+        import re
+
+        # ```json ... ``` を抽出
+        json_match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            return json_match.group(1).strip()
+
+        # ``` ... ``` を抽出
+        code_match = re.search(r'```\s*([\s\S]*?)\s*```', text)
+        if code_match:
+            return code_match.group(1).strip()
+
+        # { で始まり } で終わる部分を抽出
+        brace_match = re.search(r'(\{[\s\S]*\})', text)
+        if brace_match:
+            return brace_match.group(1).strip()
+
+        return text.strip()
+
+    def _repair_json(self, json_str: str) -> str:
+        """不完全なJSONを修復"""
+        # 未閉じの文字列を閉じる
+        if json_str.count('"') % 2 == 1:
+            json_str += '"'
+
+        # 未閉じの括弧を閉じる
+        open_braces = json_str.count('{') - json_str.count('}')
+        open_brackets = json_str.count('[') - json_str.count(']')
+
+        if open_brackets > 0:
+            json_str += ']' * open_brackets
+        if open_braces > 0:
+            json_str += '}' * open_braces
+
+        return json_str
+
     def generate(self, item: dict) -> dict:
         """情報を元にコードを生成（ターゲットリポジトリ対応）"""
-        try:
-            evaluation = item.get("evaluation", {})
-            target_repo = item.get("target_repo", "raspi-voice8")
+        evaluation = item.get("evaluation", {})
+        target_repo = item.get("target_repo", "raspi-voice8")
+        repo_template = REPO_TEMPLATES.get(target_repo, REPO_TEMPLATES["raspi-voice8"])
 
-            # リポジトリ情報を取得
-            repo_template = REPO_TEMPLATES.get(target_repo, REPO_TEMPLATES["raspi-voice8"])
+        # 最大3回リトライ
+        max_retries = 3
+        last_error = None
 
-            prompt = CODE_GENERATION_PROMPT.format(
-                repo_name=target_repo,
-                repo_description=repo_template["description"],
-                repo_purpose=repo_template.get("purpose", ""),
-                repo_structure=repo_template["structure"],
-                title=item.get("title", ""),
-                url=item.get("url", ""),
-                content=item.get("content", item.get("description", ""))[:4000],
-                summary=evaluation.get("summary", ""),
-                applicable_areas=", ".join(evaluation.get("applicable_areas", [])),
-                potential_improvements=", ".join(evaluation.get("potential_improvements", [])),
-            )
+        for attempt in range(max_retries):
+            try:
+                # リトライ時はより簡潔な出力を要求
+                extra_instruction = ""
+                if attempt > 0:
+                    extra_instruction = "\n\n重要: JSONは簡潔に、コードは1つの主要な変更のみに絞ってください。"
 
-            response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=4000,
-                messages=[{"role": "user", "content": prompt}],
-            )
+                prompt = CODE_GENERATION_PROMPT.format(
+                    repo_name=target_repo,
+                    repo_description=repo_template["description"],
+                    repo_purpose=repo_template.get("purpose", ""),
+                    repo_structure=repo_template["structure"],
+                    title=item.get("title", ""),
+                    url=item.get("url", ""),
+                    content=item.get("content", item.get("description", ""))[:3000],  # 少し短く
+                    summary=evaluation.get("summary", ""),
+                    applicable_areas=", ".join(evaluation.get("applicable_areas", [])),
+                    potential_improvements=", ".join(evaluation.get("potential_improvements", [])),
+                ) + extra_instruction
 
-            result_text = response.content[0].text
-            # JSON部分を抽出
-            if "```json" in result_text:
-                result_text = result_text.split("```json")[1].split("```")[0]
-            elif "```" in result_text:
-                result_text = result_text.split("```")[1].split("```")[0]
+                response = self.client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=8000,  # 4000 -> 8000 に増加
+                    messages=[{"role": "user", "content": prompt}],
+                )
 
-            generation = json.loads(result_text.strip())
-            generation["generated_at"] = datetime.now().isoformat()
-            generation["source_item_id"] = item.get("id")
-            generation["source_title"] = item.get("title")
-            generation["target_repo"] = target_repo
-            generation["status"] = "pending_review"
+                result_text = response.content[0].text
 
-            # 履歴に追加
-            self.generation_history["generations"].append(generation)
-            self._update_statistics(generation)
-            self._save_generation_history()
+                # JSON部分を抽出
+                json_str = self._extract_json(result_text)
 
-            logger.info(f"コード生成完了 ({target_repo}): {item.get('title', '')[:50]}")
-            return generation
+                # JSONパースを試みる
+                try:
+                    generation = json.loads(json_str)
+                except json.JSONDecodeError:
+                    # 修復を試みる
+                    repaired = self._repair_json(json_str)
+                    generation = json.loads(repaired)
 
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parse error: {e}")
-            return self._create_fallback_generation(item, str(e))
-        except Exception as e:
-            logger.error(f"Generation error: {e}")
-            return self._create_fallback_generation(item, str(e))
+                generation["generated_at"] = datetime.now().isoformat()
+                generation["source_item_id"] = item.get("id")
+                generation["source_title"] = item.get("title")
+                generation["target_repo"] = target_repo
+                generation["status"] = "pending_review"
+
+                # 履歴に追加
+                self.generation_history["generations"].append(generation)
+                self._update_statistics(generation)
+                self._save_generation_history()
+
+                logger.info(f"コード生成完了 ({target_repo}): {item.get('title', '')[:50]}")
+                return generation
+
+            except json.JSONDecodeError as e:
+                last_error = str(e)
+                logger.warning(f"JSON parse error (attempt {attempt + 1}/{max_retries}): {e}")
+                continue
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"Generation error (attempt {attempt + 1}/{max_retries}): {e}")
+                continue
+
+        # 全リトライ失敗
+        logger.error(f"全リトライ失敗: {last_error}")
+        return self._create_fallback_generation(item, last_error)
 
     def _create_fallback_generation(self, item: dict, error: str) -> dict:
         """エラー時のフォールバック"""
