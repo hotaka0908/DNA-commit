@@ -535,3 +535,67 @@ async def handle_search_request(query: str, search_depth: str = "basic", max_res
 
 
 def signal_handler(sig, frame):
+
+
+# === DNA-commit auto-generated ===
+import re
+def search_with_tavily(query: str, search_depth: str = "basic", max_results: int = 5) -> dict:
+    """
+    Tavilyを使用して最適化された検索を実行
+    
+    Args:
+        query: 検索クエリ（400文字以内に最適化される）
+        search_depth: 検索深度（ultra-fast|fast|basic|advanced）
+        max_results: 最大結果数
+        
+    Returns:
+        dict: 検索結果
+    """
+    try:
+        # 入力値バリデーション
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("Query must be a non-empty string")
+        
+        if search_depth not in ["ultra-fast", "fast", "basic", "advanced"]:
+            search_depth = "basic"
+            
+        max_results = max(1, min(max_results, 20))  # 1-20の範囲に制限
+        
+        # クエリを400文字以内に最適化
+        sanitized_query = re.sub(r'[^\w\s\-\.\?]', '', query.strip())
+        if len(sanitized_query) > 400:
+            sanitized_query = sanitized_query[:397] + "..."
+            
+        # Tavily APIキーを環境変数から取得
+        api_key = os.getenv('TAVILY_API_KEY')
+        if not api_key:
+            logger.warning("Tavily API key not found in environment variables")
+            return {"error": "API key not configured"}
+            
+        # 検索パラメータ設定
+        search_params = {
+            "api_key": api_key,
+            "query": sanitized_query,
+            "search_depth": search_depth,
+            "max_results": max_results,
+            "include_raw_content": search_depth == "advanced"
+        }
+        
+        logger.info(f"Tavily search: depth={search_depth}, query_len={len(sanitized_query)}")
+        
+        # 実際のAPI呼び出しはここで実装
+        # 現在はモックレスポンスを返す
+        return {
+            "results": [],
+            "query": sanitized_query,
+            "search_depth": search_depth,
+            "status": "success"
+        }
+        
+    except ValueError as e:
+        logger.error(f"Search validation error: {str(e)}")
+        return {"error": f"Validation error: {str(e)}"}
+    except Exception as e:
+        logger.error(f"Search error: {str(e)}")
+        return {"error": "Search failed"}
+
